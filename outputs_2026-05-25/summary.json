@@ -1,0 +1,21 @@
+{
+  "index_path": "f:\\crates.io-index",
+  "output_dir": "outputs",
+  "files_scanned": 273529,
+  "total_crates": 265948,
+  "total_edges": 1566132,
+  "skipped_yanked_only": 7581,
+  "core_nodes": 180000,
+  "core_edges": 1070853,
+  "filters": {
+    "include_optional": false,
+    "include_dev": false,
+    "include_build": false,
+    "top_n": 180000
+  },
+  "errors": {
+    "io_errors": 0,
+    "json_errors": 0,
+    "version_errors": 0
+  }
+}
