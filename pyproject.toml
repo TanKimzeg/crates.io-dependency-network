@@ -1,0 +1,19 @@
+[project]
+name = "dependencies-network"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "ipykernel>=7.2.0",
+    "matplotlib>=3.10.9",
+    "networkx>=3.6.1",
+    "numpy>=2.4.6",
+    "powerlaw>=2.0.0",
+    "tqdm>=4.66",
+    "wordcloud>=1.9.6",
+]
+
+[[tool.uv.index]]
+url = "https://pypi.mirrors.ustc.edu.cn/simple/"
+default = true
