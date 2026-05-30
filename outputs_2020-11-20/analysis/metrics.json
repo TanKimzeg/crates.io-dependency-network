@@ -1,0 +1,22 @@
+{
+  "nodes": 48551,
+  "edges": 171865,
+  "in_degree": {
+    "min": 0,
+    "max": 8122,
+    "mean": 3.5398858931844863,
+    "median": 0.0
+  },
+  "out_degree": {
+    "min": 0,
+    "max": 77,
+    "mean": 3.5398858931844863,
+    "median": 2.0
+  },
+  "total_degree": {
+    "min": 0,
+    "max": 8122,
+    "mean": 7.079771786368973,
+    "median": 3.0
+  }
+}

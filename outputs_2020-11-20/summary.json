@@ -1,0 +1,21 @@
+{
+  "index_path": "f:\\crates.io-index-archive-snapshot-2020-11-20",
+  "output_dir": "outputs_2020-11-20",
+  "files_scanned": 49761,
+  "total_crates": 48551,
+  "total_edges": 172527,
+  "skipped_yanked_only": 1210,
+  "core_nodes": 48551,
+  "core_edges": 171865,
+  "filters": {
+    "include_optional": false,
+    "include_dev": false,
+    "include_build": false,
+    "top_n": 120000
+  },
+  "errors": {
+    "io_errors": 0,
+    "json_errors": 0,
+    "version_errors": 3
+  }
+}
