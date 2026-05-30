@@ -1,0 +1,21 @@
+{
+  "index_path": "f:\\crates.io-index-archive-snapshot-2018-09-26",
+  "output_dir": "outputs_2018-09-26",
+  "files_scanned": 18762,
+  "total_crates": 18388,
+  "total_edges": 53810,
+  "skipped_yanked_only": 374,
+  "core_nodes": 18388,
+  "core_edges": 53800,
+  "filters": {
+    "include_optional": false,
+    "include_dev": false,
+    "include_build": false,
+    "top_n": 100000
+  },
+  "errors": {
+    "io_errors": 0,
+    "json_errors": 0,
+    "version_errors": 0
+  }
+}
