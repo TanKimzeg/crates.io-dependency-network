@@ -1,128 +1,110 @@
-为“复杂网络分析”课程设计一个验证 `crates` 依赖网络（`crates.io`）是否具备“无标度”和“小世界”等特征的课题，在理论意义、数据获取和实现难度上都是一个**绝佳的选择**。
+# Crates.io 生态系统依赖网络的拓扑特性与鲁棒性分析——基于复杂网络视角的实证研究
 
-在学术界，这已经不是一个猜测，而是有明确结论的方向。对此类软件生态系统的网络分析通常能证实以下结论：
+[![CC BY-NC-SA 4.0][cc-by-nc-sa-shield]][cc-by-nc-sa]
 
-* **无标度 (Scale-Free) 特征**：依赖网络中存在少数枢纽节点（`serde`、`rand` 等核心库），它们被大量其他包所依赖。这个特性已被学者通过研究 `crates.io` 等仓库证实。
-* **小世界 (Small-World) 特征**：从任意一个包出发，通常只需很少的几步就能通过依赖关系到达另一个不相关的包。这个特征在许多语言生态的包依赖网络（如 `npm`、`crates.io` 等）中被发现。
-* **模块化 (Modularity) 结构**：依赖网络中存在紧密连接的社区结构，这印证了软件工程的高内聚原则。
+[cc-by-nc-sa]: http://creativecommons.org/licenses/by-nc-sa/4.0/
 
-以下从技术实现层面，提供一个清晰的课程设计路线作为参考。
+[cc-by-nc-sa-shield]: https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-lightgrey.svg
 
 ---
 
-### 项目设计与实现路线
+## 摘要
 
-本项目主要由四个清晰的阶段构成，非常适合作为课程设计或毕业设计的课题。
+本文运用复杂网络理论，对 Rust 语言官方包仓库 Crates.io 的依赖生态进行了系统性的实证分析。我构建了包含 265948 个节点和 1566132 条边的有向依赖网络，验证了其具有显著的**无标度**（入度幂律指数 α ≈ 1.87）和**小世界**（σ ≈ 3,754.84）特性。通过中心性分析，识别出 `serde` , `serde_json` , `thiserror` , `tokio` , `anyhow` 等对生态至关重要的“基础设施”节点。鲁棒性仿真实验揭示，该网络表现出“**面对随机故障鲁棒，面对蓄意攻击脆弱**”的经典无标度特征：模拟随机故障，曲线下降慢说明网络对随机失效更鲁棒。随机移除 60% 的节点仅导致巨片规模下降 48%，模拟攻击高连接节点，曲线几乎立刻接近 0。社区发现算法成功划分出148个功能模块，有效映射了 Rust 生态的技术分类。不同时期的演化分析显示，网络的幂律指数和平均路径长度等特征随时间趋于稳定。这些发现为理解及防范 Rust 生态的供应链风险提供了量化依据。
 
-#### 阶段一：获取`crates.io`依赖关系数据
-
-要构建分析网络，首要任务是获取所有 crate 之间的依赖关系数据。可以主要参考以下方法构建自己的数据集：
-
-1. **使用数据库快照**
-    `crates.io` 官方会发布每日的数据库快照，这是构建完整依赖网络图最全面的数据源。
-    * **数据源**：我已通过 `wget https://static.crates.io/db-dump.tar.gz` 直接下载。
-
-2. **使用`crates.io`索引**
-    我在工作区 `git clone https://github.com/rust-lang/crates.io-index` 仓库，它的数据完全足够构建出一个高质量的元数据依赖网络。每个文件包含crate的元数据，示例如下：
-
-    ```json
-    {"name":"deepseek-sdk","vers":"0.2.0","deps":[{"name":"derive_builder","req":"^0.20.2","features":[],"optional":false,"default_features":true,"target":null,"kind":"normal"},{"name":"futures-util","req":"^0.3.31","features":[],"optional":false,"default_features":true,"target":null,"kind":"normal"},{"name":"reqwest","req":"^0.12","features":["json","stream"],"optional":false,"default_features":true,"target":null,"kind":"normal"},{"name":"reqwest-eventsource","req":"^0.6.0","features":[],"optional":false,"default_features":true,"target":null,"kind":"normal"},{"name":"serde","req":"^1.0.228","features":["derive"],"optional":false,"default_features":true,"target":null,"kind":"normal"},{"name":"serde_json","req":"^1.0.149","features":[],"optional":false,"default_features":true,"target":null,"kind":"normal"},{"name":"tokio","req":"^1.52.3","features":["macros","rt-multi-thread"],"optional":false,"default_features":true,"target":null,"kind":"normal"}],"cksum":"bf9e654e5c335bcfc27f10fc56a8e4a7bc8da740218eca8c3df338c3551552db","features":{},"yanked":false,"pubtime":"2026-05-25T08:00:57Z"}
-    ```
-
-    可以编写程序高效解析，提取每个 crate 的依赖关系。
-
-#### 阶段二：构建依赖图并计算拓扑属性
-
-获取数据后，核心任务是将数据转换为图结构并计算相关属性。
-
-* **图构建**：通常将每个 crate 视为一个节点。若 crate A 依赖 crate B，则从 A 到 B 建立一条有向边。
-* **工具与算法**：推荐使用 Python 的 `networkx` 库，并搭配 `powerlaw`等库进行拟合分析。
-  * **度分布**：使用 `networkx.degree()` 获取全网的度序列。
-  * **幂律检验**：通过 `powerlaw.Fit` 拟合度分布，检验其是否遵循幂律分布，以验证**无标度**假设。
-  * **平均最短路径长度**：对于大图可抽样计算，实测值通常接近对数增长。
-  * **聚类系数**：计算所有节点的平均聚类系数，实测值通常显著高于同等规模的随机网络。
-  * **小世界检验**：构造一个具有相同节点数和边数的 **E-R随机图** 或 **WS模型图**。比较这两个随机图与真实依赖网络的平均路径长度 `L` 和平均聚类系数 `C`。
-    * 若 \( \gamma \approx \frac{C_{\text{real}}}{C_{\text{random}}} \gg 1 \) 且 \( \lambda \approx \frac{L_{\text{real}}}{L_{\text{random}}} \approx 1 \)，则网络具有**小世界**特性。
-
-#### 阶段三：高级分析与可视化
-
-* **可视化**：利用 `matplotlib` 绘制度分布的**双对数坐标图**，以直观展示其幂律尾部。对于核心子图，可用 `networkx.draw` 或 `graphviz` 绘制**力导向布局图**，观察枢纽节点和社区。
-* **中心度分析**：筛选出**PageRank**或**接近中心度**最高的 crate，这些即生态系统中的关键核心库。
-* **社区发现**：应用 **Louvain** 或 **Girvan-Newman** 等社团检测算法，将网络分解为高内聚的功能模块。
-
-#### 阶段四：课程设计的预期成果
-
-通过此课题，可产出以下具体成果，构成课程的完整报告：
-
-1. **数据集概览**：描述构建的网络规模（节点数、边数、直径等）。
-2. **核心发现**：通过幂律拟合分析图、与随机模型的对比数据等证据，系统证明 `crates.io` 依赖网络具备**无标度**和**小世界**特征。
-3. **关键节点识别**：列出最核心的若干 crate，分析其为何成为关键的枢纽。
-4. **结构演化**（可选）：通过分析不同时间节点的快照数据，探讨网络特征随生态系统增长的演化趋势。
-
-### 难度与风险提示
-
-1. **计算资源**：完整的 `crates.io` 依赖图非常庞大，在PC上进行全图计算（如计算每对节点距离）几乎不可行。请设计合理的策略，或仅分析核心子图。
-2. **数据解读**：幂律拟合需要统计知识，避免过度解读。
+**关键词**：复杂网络；Crates.io；无标度网络；小世界特性；供应链风险；鲁棒性分析
 
 ---
 
-### 已实现的本地工作流
+## 1. 引言
 
-当前实现采用 **Rust 解析 + Python 分析** 的双流程：
+Rust 是一门系统级编程语言，其首个稳定版 1.0 于 2015 年发布。该语言在不依赖垃圾回收机制的前提下，通过所有权（ownership）与借用检查器（borrow checker）等编译时约束，实现了与 C 语言相当的内存与运行时效率，同时保障了内存安全与线程安全。与多数传统系统语言不同，Rust 从设计初期便将包管理器 Cargo 作为语言生态的有机组成部分。Cargo 不仅负责依赖解析与构建流程，还统一了项目的目录结构与构建规范，从而为大规模静态分析和自动化工具链的构建提供了可复用的基础设施。作为 Cargo 的中央包仓库，[Crates.io](https://crates.io/) 构成了 Rust 生态系统的核心枢纽。截至 2026 年初，[Crates.io](https://crates.io/) 已托管超过 25 万个软件包（crates），日均新增上百个包，反映出 Rust 在工业与学术领域日益增长的采纳趋势。
 
-1. **Rust** 解析 `crates.io-index`，仅保留每个 crate 的最新且未 yanked 版本；默认只统计 `normal` 依赖（可选开启 optional/dev/build）。
-2. 基于 **in-degree** 选择核心子图（Top-N），输出 `core_nodes.csv` 与 `core_edges.csv`。
-3. **Python** 对核心子图进行幂律拟合、小世界对比、中心度与社区分析，并输出图表与指标文件。
+随着生态系统的急剧膨胀，[Crates.io](https://crates.io/) 中的包之间通过 `Cargo.toml` 声明的依赖关系已经编织成一张极其庞大且紧密耦合的网络。每一个包的更新、废弃或安全事故，都有可能通过依赖链迅速传播，波及范围远超直觉预期。例如，当某个处于依赖底层的基础库被无意中移除（yank）或引入恶意代码时，数以万计的下游项目可能在一夜之间面临构建失败或安全威胁。因此，仅仅从单个包或局部依赖的角度审视软件生态，已不足以理解和防范这类系统性风险。要把握整个生态的宏观结构、演化趋势以及脆弱性，亟需一种能够从全局视角刻画依赖关系的分析框架。
 
-### 运行步骤
+近年来，将复杂网络理论应用于大规模软件生态系统分析已成为软件工程与网络科学交叉领域的热点方向。多项研究分别针对 npm、Maven、PyPI 等不同语言的包依赖网络，验证了其普遍存在的无标度（scale‑free）特性和小世界（small‑world）效应[^3]，并揭示出这些网络在面对随机故障时高度鲁棒、而在面对蓄意攻击关键枢纽节点时极为脆弱的双重特征[^4]。然而，针对 Rust 生态的此类宏观网络分析目前仍相对有限。[^5]Rust 语言特有的强类型约束、编译时安全检查以及 Cargo 对语义版本（semver）的严格遵循，是否使其依赖网络在拓扑结构上呈现出有别于其他生态的特异性？[^6]其供应链风险的分布又具有怎样的定量特征？这些问题尚缺乏系统的实证回答。
 
-#### 1) Rust 解析索引
+本文以复杂网络的视角，对 [Crates.io](https://crates.io/) 生态系统的依赖网络进行了一次较为全面的实证分析。我基于官方 `crates.io-index-archive` 仓库提供的全量版本发布信息，构建了以包名为节点、以实际正常依赖为边的有向依赖网络。在此网络基础上，本文依次完成了以下工作：（1）计算网络的基础拓扑属性，验证其是否具备无标度与小世界特征；（2）利用多种中心性指标识别对生态运转至关重要的关键枢纽节点；（3）通过鲁棒性仿真实验，量化网络在随机故障和蓄意攻击下的脆弱性差异；（4）运用社区发现算法挖掘功能模块，并结合技术分类进行解读。文章所获得的结果，旨在为理解 Rust 生态的供应链结构、评估潜在风险以及引导社区治理提供一套基于数据的量化依据（5）利用跨越多个时期的索引快照，从网络规模、幂律指数、平均路径长度等维度分析依赖网络的动态演化规律，并检验优先连接机制在 Rust 生态中的表现。文章所获得的结果，旨在为理解 Rust 生态的供应链结构、评估潜在风险、预测未来演化趋势以及引导社区治理提供一套基于数据的量化依据。
 
-```bash
-cargo run --release -- --index F:\crates.io-index --output outputs --top-n 20000
-```
+本文后续内容组织如下：第 2 节介绍数据来源、网络构建方式以及所用分析工具与指标；第 3 节详细报告各项实验结果并展开讨论，包括对多时期演化模式的专门分析；最后在第 4 节中总结全文并展望未来工作。
 
-常用参数：
+---
 
-- `--include-optional`：包含 optional 依赖
-- `--include-dev`：包含 dev 依赖
-- `--include-build`：包含 build 依赖
-- `--top-n <N>`：核心子图规模（默认 20000）
-- `--output <DIR>`：输出目录（默认 outputs）
+## 2. 数据与方法
 
-输出文件：
+### 2.1 数据来源
 
-- `outputs/core_nodes.csv`
-- `outputs/core_edges.csv`
-- `outputs/summary.json`
+本文所用数据全部来自 Rust 官方包管理体系的公开仓库。具体而言，单个 crate 的版本发布记录（包括名称、版本、依赖声明等元信息）取自 `crates.io-index-archive` 这一官方 Git 仓库[^1]，该仓库以文件树形式存储了 [Crates.io](https://crates.io/) 自创立以来`crate.io-index`的部分快照。为分析crate其他关键字段信息，我还交叉参照了 `db-dump` 数据库转储[^2]，后者提供了每日更新的全量结构化快照，涵盖了 crate 的下载量、分类标签、首次发布时间等附属属性。
 
-#### 2) Python 分析
+对于演化分析部分，我使用了 `crates.io-index-archive` 仓库所保留的不同历史快照。通过检索对应时期的 Git 树对象，重建了相隔约两年的五个时间切片（分别取自 2018-09-26、2020-11-20、2022-07-06、2024-03-11、及 2026-05-25 时刻附近的提交记录），从而获得随时间演化的多个网络版本。
 
-```bash
-uv run python main.py --edges outputs/core_edges.csv --nodes outputs/core_nodes.csv --out-dir outputs/analysis --path-samples 50
-```
+### 2.2 网络构建规则
 
-输出文件：
+我将 [Crates.io](https://crates.io/) 生态系统抽象为一个有向图 $G=(V,E)$，其中：
 
-- `outputs/analysis/metrics.json`
-- `outputs/analysis/powerlaw.json`
-- `outputs/analysis/small_world.json`
-- `outputs/analysis/degree_in.png`
-- `outputs/analysis/degree_out.png`
-- `outputs/analysis/degree_total.png`
-- `outputs/analysis/centrality.csv`
-- `outputs/analysis/community_summary.json`
+- **节点**：为聚焦于包（crate）间的宏观关系并控制网络规模，本文以 **包名** 作为节点唯一标识。换言之，同一包的不同版本被聚合并为同一个节点，节点集 $V$ 的大小即为生态中已发布 crate 的数量。
 
-### 参数建议
+- **有向边**：对于每个 crate 的每条发布记录，提取其 `deps` 字段中所有 `kind` 为 `"normal"` 且 `optional` 为 `false` 的依赖项。一条从 crate $A$ 指向 crate $B$ 的有向边 $A \to B$ 表示“$A$的正常构建必须依赖 $B$”，边的集合即反映了生态中真实、必需的编译时依赖关系。
 
-- **Top-N**：建议 10k~30k 之间，保证可在 1 小时内完成。
-- **路径长度抽样**：`--path-samples` 50~200 之间可权衡速度与稳定性。
+我刻意排除了 `kind` 为 `"dev"` 的开发依赖和 `optional` 为 `true` 的可选依赖，因为前者仅在测试或示例代码中起作用，并不跟随主 crate 传播；后者默认不被启用，不具备强制的供应链传导效应。通过这一筛选，网络能够更加忠实地刻画“除非该边存在，否则下游无法编译”的硬依赖结构。
 
-### 报告大纲（可直接用作写作提纲）
+对于演化分析中的每个时间切片，我均以当时已发布的所有 crate 为节点集，并按照相同的规则抽取有效依赖边，从而构建出一系列随时间演化的有向网络 $G_1,G_{2},…,G_{T}​$ 。
 
-1. 数据来源与预处理（索引来源、版本筛选规则、依赖类型过滤）
-2. 核心子图选择策略（按 in-degree 排序，Top-N 规则）
-3. 无标度检验（度分布图 + 幂律拟合参数）
-4. 小世界检验（与随机图对比的 $\gamma$、$\lambda$）
-5. 关键节点与社区结构（PageRank/社区划分结果）
-6. 局限性与改进方向（抽样误差、参数敏感性）
+### 2.3 分析工具与主要指标
+
+网络构建与大部分图论运算基于 Python 的 `NetworkX`（v3.1）[^7] 完成；幂律分布检验借助 `powerlaw` 库 [^8]；网络可视化主要使用 `Gephi`（v0.11）[^9] 进行布局与着色，部分统计图则通过 `Matplotlib` 输出。而贯穿其中的数据清洗、提取等管道则通过Rust语言编程实现。本文分析所依赖的代码已经开源在[https://github.com/TanKimzeg/crates.io-dependency-network](https://github.com/TanKimzeg/crates.io-dependency-network)。
+
+分析中涉及的主要网络度量指标及其定义如下：
+
+| 指标                       | 含义                                                                                                    |
+| ------------------------ | ----------------------------------------------------------------------------------------------------- |
+| **度 & 度分布**              | 节点度数为与之相连的边数。有向网络中区分入度（被依赖数）与出度（依赖数）。度分布 `P(k)` 刻画度为 `k` 的节点所占比例                                      |
+| **平均最短路径 L**             | 所有节点对之间最短路径长度的平均值，反映网络中信息或依赖传递的效率                                                                     |
+| **平均聚类系数 C**             | 节点的邻居之间也互为邻居的平均概率，衡量网络的局部紧密程度                                                                         |
+| **小世界系数 σ**              | `σ = (C/C_r) / (L/L_r)`，其中 `C_r` 与 `L_r` 为同等规模 ER 随机图的对应值。σ > 1 表明网络具有小世界效应                           |
+| **中心性指标**                | - **入度中心性**：直观反映直接流行度<br>- **介数中心性**：节点位于最短路径上的频率，识别依赖链中的“桥梁”<br>- **PageRank**：考虑邻居权重的全局影响力，对有向网络更稳健 |
+| **模块度 Q**                | 采用 Louvain 算法对网络的社区结构进行划分，并以模块度$Q$，值越接近 1 表示社区内部连接越紧密、社区之间越稀疏                                         |
+| **巨片 (Giant Component)** | 网络中的最大连通分量。在鲁棒性实验中，其相对大小是衡量网络崩溃程度的核心指标                                                                |
+| 网络演化相关指标                 | 追踪节点数 $N(t)$、平均度 $⟨k⟩_t$​、幂律指数 $α(t)$ 及平均最短路径 $L(t)$ 等指标随时间的变化趋势                                      |
+
+演化分析部分，我还计算了各时期快照的**幂律指数 α** 以及**平均度**的变化趋势，并定量评估了**新增节点的依附偏好**（即新加入的 crate 连接到高度数节点的概率是否显著高于随机连接）。
+
+### 2.4 实验设计概览
+
+基于上述网络与指标，本文设计了以下五项实验以系统性回答研究问题：
+
+1. **基础拓扑属性刻画**：计算并报告网络总体规模、密度、度分布、连通分量等基础参数。
+2. **宏观特性检验**：通过幂律拟合（含 KS 检验）与小世界系数计算，验证网络的无标度及小世界特征。
+3. **关键节点识别**：交叉比较三种中心性排序，定位生态中的核心基础设施级 crate。
+4. **鲁棒性仿真**：为评估网络的容错与抗攻击能力，我实施了两类节点移除策略：模拟随机节点移除与基于中心性的蓄意攻击，记录最大连通分量相对大小的变化曲线。
+5. **演化规律探索**：基于四个历史快照，我计算了各时期的拓扑统计量，绘制指标随时间的变化曲线，以揭示 [Crates.io](https://crates.io/) 生态的宏观演化态势。同时，为检验无标度网络理论中的**优先连接**机制是否在本生态中成立，我提取了每个时期内新增节点（即在前一个快照中不存在的 crate）在加入时刻所依附的旧节点的度值，并分析新节点选择连接目标的概率是否与目标节点的入度成正比。若正比关系近似成立，则表明生态成长遵循“富者愈富”的演化动力学。
+
+以上实验的结果将在第 3 节中逐一展示并深入讨论。
+
+---
+
+## 3. 结果与分析
+
+> 全文请见[Crates.io 生态系统依赖网络的拓扑特性与鲁棒性分析——基于复杂网络视角的实证研究](https://tankimzeg.top/blog/deep-learning/crates-io-dependency-network-analysis/)
+
+---
+
+## 参考文献
+
+[^1]: Crates.io Index Archive. <https://github.com/rust-lang/crates.io-index-archive>
+
+[^2]: Crates.io Database Dump. <https://static.crates.io/db-dump.tar.gz>
+
+[^3]: Barabási A L, Albert R. Emergence of scaling in random networks[J]. science, 1999, 286(5439): 509-512.
+
+[^4]: Ogenrwot D, Businge J, Arifuzzaman S. Structural and Connectivity Patterns in the Maven Central Software Dependency Network[C]//International Conference on Software Engineering and Data Engineering. Cham: Springer Nature Switzerland, 2025: 129-151.
+
+[^5]: Hejderup J, Beller M, Triantafyllou K, et al. Präzi: from package-based to call-based dependency networks[J]. Empirical Software Engineering, 2022, 27(5): 102.
+
+[^6]: Decan A, Mens T. What do package dependencies tell us about semantic versioning?[J]. IEEE Transactions on Software Engineering, 2019, 47(6): 1226-1240.
+
+[^7]: Hagberg A, Swart P J, Schult D A. Exploring network structure, dynamics, and function using NetworkX[R]. Los Alamos National Laboratory (LANL), 2007.
+
+[^8]: Alstott J, Bullmore E, Plenz D. powerlaw: a Python package for analysis of heavy-tailed distributions[J]. PloS one, 2014, 9(1): e85777.
+
+[^9]: Bastian M, Heymann S, Jacomy M. Gephi: an open source software for exploring and manipulating networks[C]//Proceedings of the international AAAI conference on web and social media. 2009, 3(1): 361-362.
